@@ -66,22 +66,15 @@ export default function Home() {
   };
 
   /**
-   * Delete a single occurrence of a page at the given position.
-   * Keeps the original page if duplicates exist elsewhere.
+   * Delete a page. Removes the logical index from pageOrder.
    */
-  const deletePageAt = (position: number, logicalIndex: number) => {
-    setPageOrder((prev) => {
-      if (position < 0 || position >= prev.length) return prev;
-      const next = [...prev];
-      next.splice(position, 1);
-      // Remove split marker only if that logical page no longer exists in the new order.
-      setSplitIndices((prevSplits) => {
-        if (next.includes(logicalIndex)) return prevSplits;
-        const updated = new Set(prevSplits);
-        updated.delete(logicalIndex);
-        return updated;
-      });
-      return next;
+  const deletePage = (logicalIndex: number) => {
+    setPageOrder((prev) => prev.filter((idx) => idx !== logicalIndex));
+    // remove any split marker associated with this page
+    setSplitIndices((prev) => {
+      const newSet = new Set(Array.from(prev));
+      newSet.delete(logicalIndex);
+      return newSet;
     });
   };
 
@@ -154,9 +147,11 @@ export default function Home() {
     }
   };
 
+  const fileLabel = file ? file.name : "Choose PDF";
+
   return (
     <div className="min-h-screen bg-zinc-50">
-      <div className="mx-auto w-full space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
         <header className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-3">
@@ -200,7 +195,7 @@ export default function Home() {
         {file && (
           <div className="space-y-6">
             {/* Instructions Card */}
-            {/* <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="flex items-start gap-4">
                 <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900">
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -233,7 +228,7 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-            </div> */}
+            </div>
 
             {/* PDF Pages Grid */}
             <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -248,7 +243,7 @@ export default function Home() {
                 }
                 className="w-full"
               >
-                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {pageOrder.map((pageIndex, logicalPosition) => {
                     const rotation = rotations[pageIndex] || 0;
                     const isSplit = splitIndices.has(pageIndex);
@@ -258,10 +253,11 @@ export default function Home() {
                         key={`${pageIndex}-${logicalPosition}`}
                         className="group relative overflow-visible"
                       >
-                        <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-zinc-300 hover:shadow-md">
+                        <div className="relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-gradient-to-br from-white to-slate-50 shadow-lg transition-all duration-300 hover:-translate-y-2 hover:border-indigo-300 hover:shadow-2xl">
                           {/* Page Preview Area */}
-                          <div className="relative flex h-[280px] items-center justify-center overflow-hidden bg-zinc-50 p-4">
-                            <div className="rounded border border-zinc-200 bg-white p-2 shadow-sm">
+                          <div className="relative flex h-[280px] items-center justify-center overflow-hidden bg-slate-100 p-4">
+                            <div className="absolute inset-0 bg-gradient-to-br from-slate-50 to-slate-100" />
+                            <div className="relative rounded-lg bg-white p-2 shadow-md">
                               <Page
                                 key={`page_${pageIndex}_${logicalPosition}`}
                                 pageNumber={pageIndex + 1}
@@ -274,66 +270,66 @@ export default function Home() {
                               />
                             </div>
                             
-                            {/* Action Buttons */}
+                            {/* Action Buttons - Always visible on hover */}
                             <div className="absolute inset-x-0 top-0 flex justify-center gap-2 p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                              <div className="flex gap-1 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg">
+                              <div className="flex gap-1.5 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
                                 <button
                                   onClick={() => rotatePage(pageIndex, "left")}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-gradient-to-br from-blue-50 to-blue-100 text-lg text-blue-700 shadow-sm transition-all hover:scale-110 hover:border-blue-300 hover:shadow-md active:scale-95"
                                   title="Rotate left (90°)"
                                 >
                                   ↺
                                 </button>
                                 <button
                                   onClick={() => rotatePage(pageIndex, "right")}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-gradient-to-br from-blue-50 to-blue-100 text-lg text-blue-700 shadow-sm transition-all hover:scale-110 hover:border-blue-300 hover:shadow-md active:scale-95"
                                   title="Rotate right (90°)"
                                 >
                                   ↻
                                 </button>
-                                <div className="mx-0.5 w-px bg-zinc-200" />
+                                <div className="mx-1 w-px bg-slate-200" />
                                 <button
                                   onClick={() => duplicatePage(pageIndex)}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100 text-lg text-emerald-700 shadow-sm transition-all hover:scale-110 hover:border-emerald-300 hover:shadow-md active:scale-95"
                                   title="Duplicate page"
                                 >
                                   ⧉
                                 </button>
                                 <button
                                   onClick={() => setPreviewPage(pageIndex)}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100 text-lg text-indigo-700 shadow-sm transition-all hover:scale-110 hover:border-indigo-300 hover:shadow-md active:scale-95"
                                   title="Preview full size"
                                 >
-                                  👁
+                                  �
                                 </button>
                                 <button
-                                  onClick={() => deletePageAt(logicalPosition, pageIndex)}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                  onClick={() => deletePage(pageIndex)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-gradient-to-br from-rose-50 to-rose-100 text-lg text-rose-700 shadow-sm transition-all hover:scale-110 hover:border-rose-300 hover:shadow-md active:scale-95"
                                   title="Delete page"
                                 >
-                                  🗑
+                                  �
                                 </button>
                               </div>
                             </div>
 
                             {/* Rotation indicator */}
                             {rotation !== 0 && (
-                              <div className="absolute bottom-3 right-3 rounded border border-zinc-300 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-700 shadow-sm">
+                              <div className="absolute bottom-3 right-3 rounded-full bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
                                 {rotation}°
                               </div>
                             )}
                           </div>
 
                           {/* Page Info Footer */}
-                          <div className="border-t border-zinc-200 bg-zinc-50 p-3">
+                          <div className="border-t-2 border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100 p-3">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex min-w-0 flex-1 items-center gap-2">
-                                <svg className="h-4 w-4 flex-shrink-0 text-zinc-400" fill="currentColor" viewBox="0 0 20 20">
+                                <svg className="h-4 w-4 flex-shrink-0 text-rose-500" fill="currentColor" viewBox="0 0 20 20">
                                   <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                                 </svg>
-                                <span className="truncate text-xs text-zinc-600">{file.name}</span>
+                                <span className="truncate text-xs font-medium text-slate-600">{file.name}</span>
                               </div>
-                              <span className="flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded bg-zinc-900 px-2 text-xs font-semibold text-white">
+                              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold text-white shadow-md">
                                 {pageIndex + 1}
                               </span>
                             </div>
@@ -345,17 +341,17 @@ export default function Home() {
                           <div className="absolute -right-4 top-1/2 z-10 -translate-y-1/2">
                             <button
                               onClick={() => toggleSplit(pageIndex)}
-                              className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-lg shadow-sm transition-all duration-200 hover:scale-110 active:scale-95 ${
+                              className={`group/split flex h-12 w-12 items-center justify-center rounded-full border-2 text-xl shadow-lg transition-all duration-200 hover:scale-110 active:scale-95 ${
                                 isSplit
-                                  ? "border-zinc-900 bg-zinc-900 text-white shadow-md"
-                                  : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-400 hover:bg-zinc-50"
+                                  ? "border-amber-400 bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-amber-300"
+                                  : "border-slate-300 bg-white text-slate-500 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600"
                               }`}
                               title={isSplit ? "Remove split" : "Split after this page"}
                             >
-                              ✂
+                              <span className="transition-transform group-hover/split:scale-110">✂</span>
                             </button>
                             {isSplit && (
-                              <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded border border-zinc-900 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white shadow-sm">
+                              <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
                                 Split here
                               </div>
                             )}
@@ -369,37 +365,40 @@ export default function Home() {
             </div>
 
             {numPages > 0 && (
-              <div className="sticky bottom-6 z-20 rounded-xl border border-zinc-300 bg-white p-6 shadow-lg">
+              <div className="sticky bottom-6 z-20 rounded-3xl border-2 border-indigo-200 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 p-6 shadow-2xl">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2">
-                      <svg className="h-5 w-5 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="flex items-center gap-2 rounded-xl border border-white/30 bg-white/10 px-4 py-2 backdrop-blur-sm">
+                      <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      <span className="text-sm font-semibold text-zinc-900">{numPages} pages</span>
+                      <span className="text-sm font-bold text-white">{numPages} pages</span>
                     </div>
-                    <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2">
-                      <svg className="h-5 w-5 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="flex items-center gap-2 rounded-xl border border-white/30 bg-white/10 px-4 py-2 backdrop-blur-sm">
+                      <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
-                      <span className="text-sm font-semibold text-zinc-900">{pageOrder.length} in sequence</span>
+                      <span className="text-sm font-bold text-white">{pageOrder.length} in sequence</span>
                     </div>
                     {splitIndices.size > 0 && (
-                      <div className="flex items-center gap-2 rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2">
-                        <span className="text-base">✂</span>
-                        <span className="text-sm font-semibold text-zinc-900">{splitIndices.size + 1} files</span>
+                      <div className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-400/20 px-4 py-2 backdrop-blur-sm">
+                        <span className="text-lg">✂</span>
+                        <span className="text-sm font-bold text-white">{splitIndices.size + 1} files</span>
                       </div>
                     )}
                   </div>
                   <button
                     onClick={generateAndDownloadSplits}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-zinc-800 active:scale-95"
+                    className="group relative inline-flex items-center justify-center gap-3 overflow-hidden rounded-2xl border-2 border-white bg-white px-6 py-3.5 text-base font-bold shadow-xl transition-all duration-300 hover:scale-105 hover:shadow-2xl active:scale-95"
                   >
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-0 transition-opacity group-hover:opacity-10" />
+                    <svg className="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
-                    <span>Download Split PDFs</span>
+                    <span className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                      Download Split PDFs
+                    </span>
                   </button>
                 </div>
               </div>
@@ -410,29 +409,29 @@ export default function Home() {
 
       {previewPage !== null && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
           onClick={() => setPreviewPage(null)}
         >
           <div 
-            className="relative w-full max-w-6xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl"
+            className="relative w-full max-w-6xl rounded-3xl border-2 border-slate-700 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="mb-4 flex items-center justify-between border-b border-zinc-800 pb-4">
+            <div className="mb-4 flex items-center justify-between border-b border-slate-700 pb-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-100">
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-white shadow-lg">
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-white">Page Preview</h3>
-                  <p className="text-sm text-zinc-400">Page {(previewPage ?? 0) + 1} of {numPages}</p>
+                  <h3 className="text-lg font-bold text-white">Page Preview</h3>
+                  <p className="text-sm text-slate-400">Page {(previewPage ?? 0) + 1} of {numPages}</p>
                 </div>
               </div>
               <button
                 onClick={() => setPreviewPage(null)}
-                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 active:scale-95"
+                className="flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-white shadow-lg transition-all hover:border-slate-500 hover:bg-slate-700 active:scale-95"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -442,8 +441,8 @@ export default function Home() {
             </div>
 
             {/* Preview Content */}
-            <div className="flex justify-center overflow-auto rounded-xl bg-zinc-950 p-6">
-              <div className="rounded-lg bg-white p-4 shadow-xl">
+            <div className="flex justify-center overflow-auto rounded-2xl bg-slate-950/50 p-6">
+              <div className="rounded-xl bg-white p-4 shadow-2xl">
                 <Document file={file}>
                   <Page
                     pageNumber={(previewPage ?? 0) + 1}
@@ -458,7 +457,7 @@ export default function Home() {
             </div>
 
             {/* Navigation Footer */}
-            <div className="mt-4 flex items-center justify-between border-t border-zinc-800 pt-4">
+            <div className="mt-4 flex items-center justify-between border-t border-slate-700 pt-4">
               <button
                 onClick={() => {
                   const currentPos = pageOrder.indexOf(previewPage ?? 0);
@@ -467,7 +466,7 @@ export default function Home() {
                   }
                 }}
                 disabled={pageOrder.indexOf(previewPage ?? 0) === 0}
-                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                className="flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition-all hover:border-slate-500 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -475,9 +474,9 @@ export default function Home() {
                 Previous
               </button>
               
-              <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-800/50 px-4 py-2">
-                <span className="text-sm text-zinc-400">Rotation:</span>
-                <span className="font-semibold text-white">{rotations[previewPage ?? 0] || 0}°</span>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-2">
+                <span className="text-sm text-slate-400">Rotation:</span>
+                <span className="font-bold text-white">{rotations[previewPage ?? 0] || 0}°</span>
               </div>
 
               <button
@@ -488,7 +487,7 @@ export default function Home() {
                   }
                 }}
                 disabled={pageOrder.indexOf(previewPage ?? 0) === pageOrder.length - 1}
-                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                className="flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition-all hover:border-slate-500 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
               >
                 Next
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
