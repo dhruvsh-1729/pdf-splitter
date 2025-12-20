@@ -16,8 +16,11 @@ export default function Home() {
   const [pageOrder, setPageOrder] = useState<number[]>([]);
   // rotations stores the rotation angle (in degrees) for each logical page index.
   const [rotations, setRotations] = useState<RotationMap>({});
-  // splitIndices contains indexes after which to split the PDF.
+  // splitIndices contains positions (in pageOrder) after which to split the PDF.
   const [splitIndices, setSplitIndices] = useState<Set<number>>(new Set());
+  const [autoSplitEnabled, setAutoSplitEnabled] = useState(false);
+  const [autoSplitInterval, setAutoSplitInterval] = useState(1);
+  const [skippedSections, setSkippedSections] = useState<Set<number>>(new Set());
   const [previewPage, setPreviewPage] = useState<number | null>(null);
 
   /**
@@ -29,6 +32,7 @@ export default function Home() {
     setPageOrder(Array.from(Array(nextNumPages).keys()));
     setRotations({});
     setSplitIndices(new Set());
+    setSkippedSections(new Set());
   }, []);
 
   /**
@@ -63,6 +67,7 @@ export default function Home() {
       newOrder.splice(insertIndex, 0, logicalIndex);
       return newOrder;
     });
+    setSkippedSections(new Set());
   };
 
   /**
@@ -74,31 +79,81 @@ export default function Home() {
       if (position < 0 || position >= prev.length) return prev;
       const next = [...prev];
       next.splice(position, 1);
-      // Remove split marker only if that logical page no longer exists in the new order.
+      // Shift split markers after the deleted position
       setSplitIndices((prevSplits) => {
-        if (next.includes(logicalIndex)) return prevSplits;
-        const updated = new Set(prevSplits);
-        updated.delete(logicalIndex);
+        const updated = new Set<number>();
+        const maxPos = Math.max(0, next.length - 1);
+        prevSplits.forEach((pos) => {
+          if (pos < position && pos <= maxPos) {
+            updated.add(pos);
+          } else if (pos > position && pos - 1 <= maxPos) {
+            updated.add(pos - 1);
+          }
+        });
         return updated;
       });
       return next;
     });
+    setSkippedSections(new Set());
   };
 
   /**
    * Toggle a split marker after a page. If marker exists, remove it; otherwise add it.
    */
-  const toggleSplit = (logicalIndex: number) => {
+  const toggleSplit = (position: number) => {
     setSplitIndices((prev) => {
       const newSet = new Set(Array.from(prev));
-      if (newSet.has(logicalIndex)) {
-        newSet.delete(logicalIndex);
+      if (newSet.has(position)) {
+        newSet.delete(position);
       } else {
-        newSet.add(logicalIndex);
+        newSet.add(position);
       }
       return newSet;
     });
+    setSkippedSections(new Set());
   };
+
+  /**
+   * Compute sections based on auto-split or manual markers.
+   */
+  const buildSections = () => {
+    if (!pageOrder.length) return [] as number[][];
+    if (autoSplitEnabled && autoSplitInterval > 0) {
+      const sections: number[][] = [];
+      for (let i = 0; i < pageOrder.length; i += autoSplitInterval) {
+        sections.push(pageOrder.slice(i, i + autoSplitInterval));
+      }
+      return sections;
+    }
+    const sortedPositions = Array.from(splitIndices).sort((a, b) => a - b);
+    const sections: number[][] = [];
+    let start = 0;
+    for (const pos of sortedPositions) {
+      const end = Math.min(pos, pageOrder.length - 1);
+      if (end >= start) {
+        sections.push(pageOrder.slice(start, end + 1));
+        start = end + 1;
+      }
+    }
+    sections.push(pageOrder.slice(start));
+    return sections;
+  };
+
+  const sections = buildSections();
+  const sectionMeta = (() => {
+    const meta: { start: number; end: number; length: number }[] = [];
+    let cursor = 0;
+    sections.forEach((section) => {
+      const start = cursor;
+      const length = section.length;
+      const end = cursor + Math.max(length - 1, 0);
+      meta.push({ start, end, length });
+      cursor += length;
+    });
+    return meta;
+  })();
+
+  const resetSkips = () => setSkippedSections(new Set());
 
   /**
    * Generate split PDFs based on the current state. Uses pdf-lib to copy pages,
@@ -108,25 +163,12 @@ export default function Home() {
   const generateAndDownloadSplits = async () => {
     if (!file) return;
     try {
-      // Load the original document
       const arrayBuffer = await file.arrayBuffer();
       const originalPdf = await PDFDocument.load(arrayBuffer);
-      // Determine sections based on splitIndices
-      const sortedIndices = Array.from(splitIndices).sort((a, b) => a - b);
-      const sections: number[][] = [];
-      let start = 0;
-      for (const splitAfter of sortedIndices) {
-        const end = pageOrder.findIndex((idx) => idx === splitAfter);
-        if (end >= start) {
-          sections.push(pageOrder.slice(start, end + 1));
-          start = end + 1;
-        }
-      }
-      // push remaining pages
-      sections.push(pageOrder.slice(start));
-      // create and download each section
-      for (let i = 0; i < sections.length; i++) {
-        const indices = sections[i];
+
+      const sectionsToDownload = sections.filter((_, idx) => !skippedSections.has(idx));
+      for (let i = 0; i < sectionsToDownload.length; i++) {
+        const indices = sectionsToDownload[i];
         const newPdf = await PDFDocument.create();
         for (const logicalIdx of indices) {
           const [copiedPage] = await newPdf.copyPages(originalPdf, [logicalIdx]);
@@ -198,227 +240,269 @@ export default function Home() {
         </header>
 
         {file && (
-          <div className="space-y-6">
-            {/* Instructions Card */}
-            {/* <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900">
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="flex-1 space-y-3">
-                  <h3 className="text-base font-semibold text-zinc-900">Quick Guide</h3>
-                  <div className="grid gap-2 text-sm text-zinc-600 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">↺↻</span>
-                      <span>Rotate pages</span>
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+            <div className="space-y-6">
+              {/* PDF Pages Grid */}
+              <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <Document
+                  file={file}
+                  onLoadSuccess={(data) => {
+                    setSkippedSections(new Set());
+                    onDocumentLoadSuccess(data);
+                  }}
+                  loading={
+                    <div className="flex flex-col items-center justify-center gap-4 p-12">
+                      <div className="h-10 w-10 animate-spin rounded-full border-3 border-zinc-200 border-t-zinc-900" />
+                      <p className="text-sm font-medium text-zinc-600">Loading your PDF...</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">⧉</span>
-                      <span>Duplicate pages</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">🗑</span>
-                      <span>Delete pages</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">👁</span>
-                      <span>Preview full size</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">✂</span>
-                      <span>Mark split points</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div> */}
-
-            {/* PDF Pages Grid */}
-            <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <Document
-                file={file}
-                onLoadSuccess={onDocumentLoadSuccess}
-                loading={
-                  <div className="flex flex-col items-center justify-center gap-4 p-12">
-                    <div className="h-10 w-10 animate-spin rounded-full border-3 border-zinc-200 border-t-zinc-900" />
-                    <p className="text-sm font-medium text-zinc-600">Loading your PDF...</p>
-                  </div>
-                }
-                className="w-full"
-              >
-                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                  {pageOrder.map((pageIndex, logicalPosition) => {
-                    const rotation = rotations[pageIndex] || 0;
-                    const isSplit = splitIndices.has(pageIndex);
-                    const isLast = logicalPosition === pageOrder.length - 1;
-                    return (
-                      <div
-                        key={`${pageIndex}-${logicalPosition}`}
-                        className="group relative overflow-visible"
-                      >
-                        <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-zinc-300 hover:shadow-md">
-                          {/* Page Preview Area */}
-                          <div className="relative flex h-[280px] items-center justify-center overflow-hidden bg-zinc-50 p-4">
-                            <div className="rounded border border-zinc-200 bg-white p-2 shadow-sm">
-                              <Page
-                                key={`page_${pageIndex}_${logicalPosition}`}
-                                pageNumber={pageIndex + 1}
-                                renderMode="canvas"
-                                renderAnnotationLayer={false}
-                                renderTextLayer={false}
-                                height={220}
-                                rotate={rotation}
-                                className="pointer-events-none select-none"
-                              />
-                            </div>
-                            
-                            {/* Action Buttons */}
-                            <div className="absolute inset-x-0 top-0 flex justify-center gap-2 p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                              <div className="flex gap-1 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg">
-                                <button
-                                  onClick={() => rotatePage(pageIndex, "left")}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
-                                  title="Rotate left (90°)"
-                                >
-                                  ↺
-                                </button>
-                                <button
-                                  onClick={() => rotatePage(pageIndex, "right")}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
-                                  title="Rotate right (90°)"
-                                >
-                                  ↻
-                                </button>
-                                <div className="mx-0.5 w-px bg-zinc-200" />
-                                <button
-                                  onClick={() => duplicatePage(pageIndex)}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
-                                  title="Duplicate page"
-                                >
-                                  ⧉
-                                </button>
-                                <button
-                                  onClick={() => setPreviewPage(pageIndex)}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
-                                  title="Preview full size"
-                                >
-                                  👁
-                                </button>
-                                <button
-                                  onClick={() => deletePageAt(logicalPosition, pageIndex)}
-                                  className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
-                                  title="Delete page"
-                                >
-                                  🗑
-                                </button>
+                  }
+                  className="w-full"
+                >
+                  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                    {pageOrder.map((pageIndex, logicalPosition) => {
+                      const rotation = rotations[pageIndex] || 0;
+                      const isSplit = splitIndices.has(logicalPosition);
+                      const isLast = logicalPosition === pageOrder.length - 1;
+                      return (
+                        <div
+                          key={`${pageIndex}-${logicalPosition}`}
+                          className="group relative overflow-visible"
+                        >
+                          <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-zinc-300 hover:shadow-md">
+                            {/* Page Preview Area */}
+                            <div className="relative flex h-[280px] items-center justify-center overflow-hidden bg-zinc-50 p-4">
+                              <div className="rounded border border-zinc-200 bg-white p-2 shadow-sm">
+                                <Page
+                                  key={`page_${pageIndex}_${logicalPosition}`}
+                                  pageNumber={pageIndex + 1}
+                                  renderMode="canvas"
+                                  renderAnnotationLayer={false}
+                                  renderTextLayer={false}
+                                  height={220}
+                                  rotate={rotation}
+                                  className="pointer-events-none select-none"
+                                />
                               </div>
+                              
+                              {/* Action Buttons */}
+                              <div className="absolute inset-x-0 top-0 flex justify-center gap-2 p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                                <div className="flex gap-1 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg">
+                                  <button
+                                    onClick={() => rotatePage(pageIndex, "left")}
+                                    className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                    title="Rotate left (90°)"
+                                  >
+                                    ↺
+                                  </button>
+                                  <button
+                                    onClick={() => rotatePage(pageIndex, "right")}
+                                    className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                    title="Rotate right (90°)"
+                                  >
+                                    ↻
+                                  </button>
+                                  <div className="mx-0.5 w-px bg-zinc-200" />
+                                  <button
+                                    onClick={() => duplicatePage(pageIndex)}
+                                    className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                    title="Duplicate page"
+                                  >
+                                    ⧉
+                                  </button>
+                                  <button
+                                    onClick={() => setPreviewPage(pageIndex)}
+                                    className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                    title="Preview full size"
+                                  >
+                                    👁
+                                  </button>
+                                  <button
+                                    onClick={() => deletePageAt(logicalPosition, pageIndex)}
+                                    className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
+                                    title="Delete page"
+                                  >
+                                    🗑
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Rotation indicator */}
+                              {rotation !== 0 && (
+                                <div className="absolute bottom-3 right-3 rounded border border-zinc-300 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-700 shadow-sm">
+                                  {rotation}°
+                                </div>
+                              )}
                             </div>
 
-                            {/* Rotation indicator */}
-                            {rotation !== 0 && (
-                              <div className="absolute bottom-3 right-3 rounded border border-zinc-300 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-700 shadow-sm">
-                                {rotation}°
+                            {/* Page Info Footer */}
+                            <div className="border-t border-zinc-200 bg-zinc-50 p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                  <svg className="h-4 w-4 flex-shrink-0 text-zinc-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                                  </svg>
+                                  <span className="truncate rounded bg-red-100 px-2 py-1 text-xs font-normal text-red-600">
+                                    {file.name}
+                                  </span>
+                                </div>
+                                <span className="flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded bg-zinc-900 px-2 text-xs font-semibold text-white">
+                                  {pageIndex + 1}
+                                </span>
                               </div>
-                            )}
+                            </div>
                           </div>
 
-                          {/* Page Info Footer */}
-                          <div className="border-t border-zinc-200 bg-zinc-50 p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex min-w-0 flex-1 items-center gap-2">
-                                <svg className="h-4 w-4 flex-shrink-0 text-zinc-400" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                                </svg>
-                                <span className="truncate text-xs text-zinc-600">{file.name}</span>
-                              </div>
-                              <span className="flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded bg-zinc-900 px-2 text-xs font-semibold text-white">
-                                {pageIndex + 1}
-                              </span>
+                          {/* Split Button */}
+                          {!isLast && (
+                            <div className="absolute -right-4 top-1/2 z-10 -translate-y-1/2">
+                              <button
+                                onClick={() => toggleSplit(logicalPosition)}
+                                className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-lg shadow-sm transition-all duration-200 hover:scale-110 active:scale-95 ${
+                                  isSplit
+                                    ? "border-zinc-900 bg-zinc-900 text-white shadow-md"
+                                    : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-400 hover:bg-zinc-50"
+                                }`}
+                                title={isSplit ? "Remove split" : "Split after this page"}
+                              >
+                                ✂
+                              </button>
+                              {isSplit && (
+                                <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded border border-zinc-900 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white shadow-sm">
+                                  Split here
+                                </div>
+                              )}
                             </div>
-                          </div>
+                          )}
                         </div>
-
-                        {/* Split Button */}
-                        {!isLast && (
-                          <div className="absolute -right-4 top-1/2 z-10 -translate-y-1/2">
-                            <button
-                              onClick={() => toggleSplit(pageIndex)}
-                              className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-lg shadow-sm transition-all duration-200 hover:scale-110 active:scale-95 ${
-                                isSplit
-                                  ? "border-zinc-900 bg-zinc-900 text-white shadow-md"
-                                  : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-400 hover:bg-zinc-50"
-                              }`}
-                              title={isSplit ? "Remove split" : "Split after this page"}
-                            >
-                              ✂
-                            </button>
-                            {isSplit && (
-                              <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded border border-zinc-900 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white shadow-sm">
-                                Split here
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </Document>
+                      );
+                    })}
+                  </div>
+                </Document>
+              </div>
             </div>
 
-            {numPages > 0 && (
-              <div className="sticky bottom-6 z-20 rounded-xl border border-zinc-300 bg-white p-6 shadow-lg">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2">
-                      <svg className="h-5 w-5 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span className="text-sm font-semibold text-zinc-900">{numPages} pages</span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2">
-                      <svg className="h-5 w-5 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      <span className="text-sm font-semibold text-zinc-900">{pageOrder.length} in sequence</span>
-                    </div>
-                    {splitIndices.size > 0 && (
-                      <div className="flex items-center gap-2 rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2">
-                        <span className="text-base">✂</span>
-                        <span className="text-sm font-semibold text-zinc-900">{splitIndices.size + 1} files</span>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={generateAndDownloadSplits}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-zinc-800 active:scale-95"
-                  >
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    <span>Download Split PDFs</span>
-                  </button>
-                </div>
+            {/* Sidebar */}
+            <aside className="flex h-fit flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-zinc-900">Split Controls</h3>
+                <span className="text-xs text-zinc-500">{sections.length} files</span>
               </div>
-            )}
+              <label className="group relative inline-flex cursor-pointer items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-white">
+                <span className="rounded bg-zinc-900 px-2 py-1 text-xs uppercase tracking-wide text-white">Add PDF</span>
+                <span className="max-w-[160px] truncate text-zinc-700">
+                  {file ? file.name : "Choose PDF"}
+                </span>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => {
+                    resetSkips();
+                    handleFileChange(e);
+                  }}
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                />
+              </label>
+              <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
+                  <input
+                    type="checkbox"
+                    checked={autoSplitEnabled}
+                    onChange={(e) => {
+                      setAutoSplitEnabled(e.target.checked);
+                      resetSkips();
+                    }}
+                    className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-800"
+                  />
+                  Split every
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={autoSplitInterval}
+                  onChange={(e) => {
+                    const val = Math.max(1, Number(e.target.value) || 1);
+                    setAutoSplitInterval(val);
+                    resetSkips();
+                  }}
+                  className="w-16 rounded border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none"
+                />
+                <span className="text-sm text-zinc-600">pages</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm">
+                <span className="text-zinc-700">Manual splits</span>
+                <span className="text-zinc-500">{autoSplitEnabled ? "Disabled" : `${splitIndices.size} cuts`}</span>
+              </div>
+              <div className="max-h-[320px] space-y-2 overflow-auto rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                {sections.map((section, idx) => {
+                  const meta = sectionMeta[idx];
+                  const isSkipped = skippedSections.has(idx);
+                  return (
+                    <div
+                      key={`section-${idx}`}
+                      className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${
+                        isSkipped
+                          ? "border-rose-200 bg-rose-50/80 text-rose-700"
+                          : "border-zinc-200 bg-white text-zinc-800"
+                      }`}
+                    >
+                      <div>
+                        <p className="font-semibold">Split {idx + 1}</p>
+                        <p className="text-xs text-zinc-500">
+                          Pages {meta.start + 1} - {meta.end + 1} ({meta.length})
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSkippedSections((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(idx)) {
+                              next.delete(idx);
+                            } else {
+                              next.add(idx);
+                            }
+                            return next;
+                          });
+                        }}
+                        className={`rounded px-3 py-1 text-xs font-semibold transition ${
+                          isSkipped
+                            ? "bg-rose-600 text-white hover:bg-rose-500"
+                            : "bg-zinc-900 text-white hover:bg-zinc-800"
+                        }`}
+                      >
+                        {isSkipped ? "Restore" : "Remove"}
+                      </button>
+                    </div>
+                  );
+                })}
+                {sections.length === 0 && (
+                  <p className="text-center text-xs text-zinc-500">No splits defined</p>
+                )}
+              </div>
+              <button
+                onClick={generateAndDownloadSplits}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-zinc-800 active:scale-95"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Download Split PDFs</span>
+              </button>
+            </aside>
           </div>
         )}
       </div>
 
       {previewPage !== null && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 sm:p-6"
           onClick={() => setPreviewPage(null)}
         >
           <div 
-            className="relative w-full max-w-6xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl"
+            className="relative flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="mb-4 flex items-center justify-between border-b border-zinc-800 pb-4">
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-800 p-4 sm:p-6">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-100">
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -437,28 +521,42 @@ export default function Home() {
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                Close
+                <span className="hidden sm:inline">Close</span>
               </button>
             </div>
 
             {/* Preview Content */}
-            <div className="flex justify-center overflow-auto rounded-xl bg-zinc-950 p-6">
-              <div className="rounded-lg bg-white p-4 shadow-xl">
-                <Document file={file}>
-                  <Page
-                    pageNumber={(previewPage ?? 0) + 1}
-                    renderMode="canvas"
-                    renderAnnotationLayer={false}
-                    renderTextLayer={false}
-                    width={Math.min(900, window.innerWidth - 200)}
-                    rotate={rotations[previewPage] || 0}
-                  />
-                </Document>
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-xl bg-zinc-950 p-4 sm:p-6">
+              <div className="flex items-center justify-center">
+                <div className="rounded-lg bg-white p-3 shadow-xl sm:p-4">
+                  <Document file={file}>
+                    <Page
+                      pageNumber={(previewPage ?? 0) + 1}
+                      renderMode="canvas"
+                      renderAnnotationLayer={false}
+                      renderTextLayer={false}
+                      width={(() => {
+                        if (typeof window === 'undefined') return 600;
+                        const maxWidth = Math.min(window.innerWidth - 100, 1200);
+                        const maxHeight = window.innerHeight - 300;
+                        // Calculate based on typical A4 ratio (1.414)
+                        const widthFromHeight = maxHeight / 1.414;
+                        return Math.min(maxWidth, widthFromHeight);
+                      })()}
+                      rotate={rotations[previewPage] || 0}
+                      loading={
+                        <div className="flex h-[600px] w-[424px] items-center justify-center">
+                          <div className="h-10 w-10 animate-spin rounded-full border-3 border-zinc-200 border-t-zinc-900" />
+                        </div>
+                      }
+                    />
+                  </Document>
+                </div>
               </div>
             </div>
 
             {/* Navigation Footer */}
-            <div className="mt-4 flex items-center justify-between border-t border-zinc-800 pt-4">
+            <div className="flex flex-shrink-0 items-center justify-between border-t border-zinc-800 p-4 sm:p-6">
               <button
                 onClick={() => {
                   const currentPos = pageOrder.indexOf(previewPage ?? 0);
@@ -467,17 +565,17 @@ export default function Home() {
                   }
                 }}
                 disabled={pageOrder.indexOf(previewPage ?? 0) === 0}
-                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95 sm:px-4"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                Previous
+                <span className="hidden sm:inline">Previous</span>
               </button>
               
-              <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-800/50 px-4 py-2">
-                <span className="text-sm text-zinc-400">Rotation:</span>
-                <span className="font-semibold text-white">{rotations[previewPage ?? 0] || 0}°</span>
+              <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-800/50 px-3 py-2 sm:px-4">
+                <span className="text-xs text-zinc-400 sm:text-sm">Rotation:</span>
+                <span className="text-sm font-semibold text-white sm:text-base">{rotations[previewPage ?? 0] || 0}°</span>
               </div>
 
               <button
@@ -488,9 +586,9 @@ export default function Home() {
                   }
                 }}
                 disabled={pageOrder.indexOf(previewPage ?? 0) === pageOrder.length - 1}
-                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95 sm:px-4"
               >
-                Next
+                <span className="hidden sm:inline">Next</span>
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
