@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { PDFDocument, degrees } from "pdf-lib";
+import JSZip from "jszip";
 import {
   FileText,
   Upload,
@@ -173,8 +174,8 @@ export default function Home() {
 
   /**
    * Generate split PDFs based on the current state. Uses pdf-lib to copy pages,
-   * apply rotations, and produce separate documents. Each document is downloaded
-   * sequentially.
+   * apply rotations, and produce separate documents. Files are bundled into a
+   * single ZIP to avoid browser limits on multiple automatic downloads.
    */
   const generateAndDownloadSplits = async () => {
     if (!file) return;
@@ -183,6 +184,14 @@ export default function Home() {
       const originalPdf = await PDFDocument.load(arrayBuffer);
 
       const sectionsToDownload = sections.filter((_, idx) => !skippedSections.has(idx));
+      if (!sectionsToDownload.length) {
+        alert("No splits selected for download.");
+        return;
+      }
+
+      const zip = new JSZip();
+      const baseName = file.name.replace(/\.pdf$/i, "") || "split";
+
       for (let i = 0; i < sectionsToDownload.length; i++) {
         const indices = sectionsToDownload[i];
         const newPdf = await PDFDocument.create();
@@ -196,16 +205,19 @@ export default function Home() {
           newPdf.addPage(copiedPage);
         }
         const pdfBytes = await newPdf.save();
-        const blob = new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `split_${i + 1}.pdf`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        const paddedIndex = String(i + 1).padStart(3, "0");
+        zip.file(`${baseName}_split_${paddedIndex}.pdf`, pdfBytes);
       }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${baseName}_splits.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
       alert("There was an error generating the split PDFs. Please try again.");
@@ -467,8 +479,11 @@ export default function Home() {
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-zinc-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Download className="h-5 w-5" />
-                <span>Download Split PDFs</span>
+                <span>Download Split PDFs (ZIP)</span>
               </button>
+              <p className="text-xs text-zinc-500">
+                Files are bundled in one zip to avoid browser limits on multiple downloads.
+              </p>
             </aside>
           </div>
       </div>

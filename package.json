@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",
     "next": "13.4.6",
     "pdf-lib": "^1.17.1",
