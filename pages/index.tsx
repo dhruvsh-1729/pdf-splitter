@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { PDFDocument, degrees } from "pdf-lib";
 import JSZip from "jszip";
@@ -38,7 +38,7 @@ export default function Home() {
   const [autoSplitEnabled, setAutoSplitEnabled] = useState(false);
   const [autoSplitInterval, setAutoSplitInterval] = useState(1);
   const [skippedSections, setSkippedSections] = useState<Set<number>>(new Set());
-  const [previewPage, setPreviewPage] = useState<number | null>(null);
+  const [previewPosition, setPreviewPosition] = useState<number | null>(null);
 
   /**
    * Called when a PDF is successfully loaded. Updates number of pages and initializes pageOrder.
@@ -172,6 +172,31 @@ export default function Home() {
 
   const resetSkips = () => setSkippedSections(new Set());
 
+  const previewContext =
+    previewPosition !== null &&
+    previewPosition >= 0 &&
+    previewPosition < pageOrder.length &&
+    file
+      ? (() => {
+          const logicalIndex = pageOrder[previewPosition];
+          const occurrence =
+            pageOrder.slice(0, previewPosition + 1).filter((idx) => idx === logicalIndex).length;
+          const totalOccurrences = pageOrder.filter((idx) => idx === logicalIndex).length;
+          return { logicalIndex, occurrence, totalOccurrences };
+        })()
+      : null;
+
+  /**
+   * Close the preview when the underlying page order changes such that the
+   * current preview position is no longer valid, or when no file is loaded.
+   */
+  useEffect(() => {
+    if (previewPosition === null) return;
+    if (!file || previewPosition < 0 || previewPosition >= pageOrder.length) {
+      setPreviewPosition(null);
+    }
+  }, [file, pageOrder, previewPosition]);
+
   /**
    * Generate split PDFs based on the current state. Uses pdf-lib to copy pages,
    * apply rotations, and produce separate documents. Files are bundled into a
@@ -298,7 +323,7 @@ export default function Home() {
                                     <Copy className="h-4 w-4" />
                                   </button>
                                   <button
-                                    onClick={() => setPreviewPage(pageIndex)}
+                                    onClick={() => setPreviewPosition(logicalPosition)}
                                     className="flex h-8 w-8 items-center justify-center rounded border border-zinc-200 bg-white text-base text-zinc-700 transition-all hover:bg-zinc-50 active:scale-95"
                                     title="Preview full size"
                                   >
@@ -488,10 +513,10 @@ export default function Home() {
           </div>
       </div>
 
-      {previewPage !== null && (
+      {previewPosition !== null && previewContext && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 sm:p-6"
-          onClick={() => setPreviewPage(null)}
+          onClick={() => setPreviewPosition(null)}
         >
           <div 
             className="relative flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl"
@@ -505,11 +530,18 @@ export default function Home() {
                 </div>
                 <div>
                   <h3 className="text-base font-semibold text-white">Page Preview</h3>
-                  <p className="text-sm text-zinc-400">Page {(previewPage ?? 0) + 1} of {numPages}</p>
+                  <p className="text-sm text-zinc-400">
+                    Page {previewContext.logicalIndex + 1} of {numPages}
+                    {previewContext.totalOccurrences > 1 && (
+                      <span className="ml-2 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200">
+                        Copy {previewContext.occurrence} of {previewContext.totalOccurrences}
+                      </span>
+                    )}
+                  </p>
                 </div>
               </div>
               <button
-                onClick={() => setPreviewPage(null)}
+                onClick={() => setPreviewPosition(null)}
                 className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 active:scale-95"
               >
                 <X className="h-4 w-4" />
@@ -523,7 +555,7 @@ export default function Home() {
                 <div className="rounded-lg bg-white p-3 shadow-xl sm:p-4">
                   <Document file={file}>
                     <Page
-                      pageNumber={(previewPage ?? 0) + 1}
+                      pageNumber={previewContext.logicalIndex + 1}
                       renderMode="canvas"
                       renderAnnotationLayer={false}
                       renderTextLayer={false}
@@ -535,7 +567,7 @@ export default function Home() {
                         const widthFromHeight = maxHeight / 1.414;
                         return Math.min(maxWidth, widthFromHeight);
                       })()}
-                      rotate={rotations[previewPage] || 0}
+                      rotate={rotations[previewContext.logicalIndex] || 0}
                       loading={
                         <div className="flex h-[600px] w-[424px] items-center justify-center">
                           <Loader2 className="h-10 w-10 animate-spin text-zinc-900" />
@@ -551,12 +583,11 @@ export default function Home() {
             <div className="flex flex-shrink-0 items-center justify-between border-t border-zinc-800 p-4 sm:p-6">
               <button
                 onClick={() => {
-                  const currentPos = pageOrder.indexOf(previewPage ?? 0);
-                  if (currentPos > 0) {
-                    setPreviewPage(pageOrder[currentPos - 1]);
+                  if (previewPosition !== null && previewPosition > 0) {
+                    setPreviewPosition(previewPosition - 1);
                   }
                 }}
-                disabled={pageOrder.indexOf(previewPage ?? 0) === 0}
+                disabled={previewPosition === null || previewPosition === 0}
                 className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95 sm:px-4"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -565,17 +596,18 @@ export default function Home() {
               
               <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-800/50 px-3 py-2 sm:px-4">
                 <span className="text-xs text-zinc-400 sm:text-sm">Rotation:</span>
-                <span className="text-sm font-semibold text-white sm:text-base">{rotations[previewPage ?? 0] || 0}°</span>
+                <span className="text-sm font-semibold text-white sm:text-base">
+                  {rotations[previewContext.logicalIndex] || 0}°
+                </span>
               </div>
 
               <button
                 onClick={() => {
-                  const currentPos = pageOrder.indexOf(previewPage ?? 0);
-                  if (currentPos < pageOrder.length - 1) {
-                    setPreviewPage(pageOrder[currentPos + 1]);
+                  if (previewPosition !== null && previewPosition < pageOrder.length - 1) {
+                    setPreviewPosition(previewPosition + 1);
                   }
                 }}
-                disabled={pageOrder.indexOf(previewPage ?? 0) === pageOrder.length - 1}
+                disabled={previewPosition === null || previewPosition === pageOrder.length - 1}
                 className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95 sm:px-4"
               >
                 <span className="hidden sm:inline">Next</span>
