@@ -1,3 +1,31 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    /* Nothing in this app should ever scroll sideways on a phone. */
+    overflow-x: hidden;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Taps shouldn't wait on the 300ms double-tap-zoom check. */
+  button,
+  label,
+  [role="switch"] {
+    touch-action: manipulation;
+  }
+
+  /* iOS zooms the viewport for any input under 16px. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
